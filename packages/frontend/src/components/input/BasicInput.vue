@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, type Ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { addShape, type Vector, type WhiteboardData } from '../../data'
 import { createEmitter, type Emitter, type Events } from '../../utils/emitter'
