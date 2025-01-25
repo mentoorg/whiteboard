@@ -40,11 +40,11 @@ export type Shape = PreShape & {
 }
 
 export interface Strokable {
-    stroke: string
+    stroke?: string
 }
 
 export interface Fillable {
-    fill: string
+    fill?: string
 }
 
 export interface LineShape extends Strokable {

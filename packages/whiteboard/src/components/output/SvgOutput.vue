@@ -33,8 +33,8 @@ defineExpose({ outputEl })
                 :cx="shape.x"
                 :cy="shape.y"
                 :r="shape.radius"
-                :fill="shape.fill"
-                :stroke="shape.stroke"
+                :fill="shape.fill ?? 'none'"
+                :stroke="shape.stroke ?? '#000'"
             ></circle>
         </g>
     </svg>

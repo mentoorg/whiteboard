@@ -11,13 +11,22 @@ defineProps<{
 
 const outputComp = ref<InstanceType<typeof SvgOutput> | null>(null)
 const outputEl = computed(() => outputComp.value?.outputEl)
+
+const cursor = ref('auto')
+const setCursor = (value: string) => {
+    cursor.value = value
+}
 </script>
 
 <template>
-    <div class="whiteboard">
+    <div
+        class="whiteboard"
+        :style="{ cursor }"
+    >
         <BasicInput
             :data="data"
             :output-el="outputEl"
+            @set-cursor="setCursor"
         />
 
         <SvgOutput

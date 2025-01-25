@@ -2,85 +2,62 @@
 import { computed, reactive, ref, type Ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { addShape, type Vector, type WhiteboardData } from '../../data'
+import { createEmitter, type Emitter, type Events } from '../../utils/emitter'
 
-interface ToolHandle<S> {
-    state: Ref<S>
-    reset: () => void
-    onClick: (ev: MouseEvent) => void
-    onMove: (ev: MouseEvent) => void
-}        
+type ToolHandle = Emitter<ToolEvents>
 
-type MouseListener<S> = (handle: ToolHandle<S>, pos: Vector) => void
+interface ToolEvents extends Events {
+    start: []
+    end: []
+    click: [ pos: Vector ]
+    move: [ pos: Vector ]
+}
 
-const createToolHandle = <S>(
-    {
-        state: initialState,
-        onClick,
-        onMove,
-        onReset,
-    }: {
-        state: S,
-        onClick?: MouseListener<S>,
-        onMove?: MouseListener<S>,
-        onReset?: (handle: ToolHandle<S>) => void
-    },
-): ToolHandle<S> => {
-    const state = ref(initialState) as Ref<S>
-
-    const wrapMouseListener = (inner?: MouseListener<S>) => {
-        if (inner) return (ev: MouseEvent) => {
-            const rect = outputBoundingRect.value
-            if (! rect) return
-
-            const pos = {
-                x: ev.clientX - rect.left,
-                y: ev.clientY - rect.top,
-            }
-            inner(handle, pos)
-        }
-        return () => {}
-    }
-
-    const handle = {
-        state,
-        reset: () => {
-            onReset?.(handle)
-            state.value = initialState
-        },
-        onClick: wrapMouseListener(onClick),
-        onMove: wrapMouseListener(onMove),
-    }
-
+const createToolHandle = (setup: (handle: ToolHandle) => void): ToolHandle => {
+    const handle = createEmitter()
+    setup(handle)
     return handle
 }
 
-type LineToolState =
-    | { state: 'wait-for-start' }
-    | {
-        state: 'wait-for-end'
-        start: Vector
-        disposeStartPoint: () => void
-        disposePreview?: () => void
-    }
-
 const TOOLS = {
-    select: {
-        handler: createToolHandle({
-            state: {},
-            onClick: () => {},
+    move: {
+        handle: createToolHandle(handle => {
+            handle.on('start', () => {
+                emit('setCursor', 'all-scroll')
+            })
         })
     },
     line: {
-        handler: createToolHandle<LineToolState>({
-            state: { state: 'wait-for-start' },
-            onClick: ({ state, reset }, pos) => {
+        handle: createToolHandle(handle => {
+            type LineToolState =
+                | { state: 'wait-for-start' }
+                | {
+                    state: 'wait-for-end'
+                    start: Vector
+                    disposeStartPoint: () => void
+                    disposePreview?: () => void
+                }
+            const state = ref<LineToolState>({ state: 'wait-for-start' })
+
+            const start = () => {
+                emit('setCursor', 'crosshair')
+                state.value = { state: 'wait-for-start' }
+            }
+            const end = () => {
+                if (state.value.state === 'wait-for-end') {
+                    state.value.disposeStartPoint()
+                    state.value.disposePreview?.()
+                }
+            }
+
+            handle.on('start', start)
+            handle.on('end', end)
+            handle.on('click', pos => {
                 if (state.value.state === 'wait-for-start') {
                     const disposeStartPoint = addShape(props.data, {
                         type: 'circle',
                         ...pos,
                         radius: 3,
-                        fill: 'transparent',
-                        stroke: '#000',
                     })
                     state.value = { state: 'wait-for-end', start: pos, disposeStartPoint }
                 }
@@ -92,10 +69,11 @@ const TOOLS = {
                         end: pos,
                         stroke: brush.strokeColor,
                     })
-                    reset()
+                    end()
+                    start()
                 }
-            },
-            onMove: ({ state }, pos) => {
+            })
+            handle.on('move', pos => {
                 if (state.value.state !== 'wait-for-end') return
                 state.value.disposePreview?.()
                 const disposePreviewLine = addShape(props.data, {
@@ -108,29 +86,24 @@ const TOOLS = {
                     type: 'circle',
                     ...pos,
                     radius: 3,
-                    fill: 'transparent',
-                    stroke: '#000',
                 })
                 state.value.disposePreview = () => {
                     disposePreviewLine()
                     disposePreviewCircle()
                 }
-            },
-            onReset: ({ state }) => {
-                if (state.value.state === 'wait-for-start') return
-                state.value.disposeStartPoint()
-                state.value.disposePreview?.()
-            }
+            })
         })
     }
 } satisfies Record<string, {
-    handler: ToolHandle<any>
+    handle: ToolHandle
 }>
 
-type Tool = keyof typeof TOOLS
+type ToolName = keyof typeof TOOLS
 
-const selectedToolName = ref<Tool>('line')
-const selectedTool = computed(() => TOOLS[selectedToolName.value])
+const selectedToolName = ref<ToolName | null>(null)
+const selectedTool = computed(() =>
+    selectedToolName.value ? TOOLS[selectedToolName.value] : null
+)
 
 interface Brush {
     strokeColor: string
@@ -145,15 +118,39 @@ const props = defineProps<{
     data: WhiteboardData
     outputEl: Element | null | undefined
 }>()
+
+const emit = defineEmits<{
+    setCursor: [ cursor: string ]
+}>()
+
 const outputBoundingRect = computed(() => props.outputEl?.getBoundingClientRect())
+const wrapMouseListener = (listener: (pos: Vector) => void) => (ev: MouseEvent) => {
+    const rect = outputBoundingRect.value
+    if (! rect) return
 
-useEventListener(() => props.outputEl, 'click', (ev: MouseEvent) => {
-    selectedTool.value.handler.onClick(ev)
-})
+    const pos = {
+        x: ev.clientX - rect.left,
+        y: ev.clientY - rect.top,
+    }
+    listener(pos)
+}
 
-useEventListener(window, 'mousemove', (ev: MouseEvent) => {
-    selectedTool.value.handler.onMove(ev)
-})
+useEventListener(window, 'click', wrapMouseListener(pos =>
+    selectedTool.value?.handle.emit('click', pos)
+))
+
+useEventListener(window, 'mousemove', wrapMouseListener(pos =>
+    selectedTool.value?.handle.emit('move', pos)
+))
+
+const selectTool = (toolName: ToolName) => {
+    if (selectedToolName.value === toolName) return
+    selectedTool.value?.handle.emit('end')
+    selectedToolName.value = toolName
+    selectedTool.value!.handle.emit('start')
+}
+
+selectTool('line')
 </script>
 
 <template>
@@ -163,7 +160,7 @@ useEventListener(window, 'mousemove', (ev: MouseEvent) => {
                 :key="toolName"
                 class="tool-button"
                 :class="{ selected: selectedToolName === toolName }"
-                @click="selectedToolName = toolName"
+                @click.stop="selectTool(toolName)"
             >
                 {{ toolName }}
             </button>
@@ -187,6 +184,8 @@ useEventListener(window, 'mousemove', (ev: MouseEvent) => {
     background-color: #aaa;
     color: #000;
     transition: background-color .2s, color .2s;
+
+    cursor: pointer;
 }
 
 .tool-button:hover, .tool-button.selected {
