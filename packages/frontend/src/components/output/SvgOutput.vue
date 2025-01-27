@@ -36,6 +36,16 @@ defineExpose({ outputEl })
                 :fill="shape.fill ?? 'none'"
                 :stroke="shape.stroke ?? '#000'"
             ></circle>
+
+            <rect
+                v-else-if="shape.type === 'rect'"
+                :x="shape.topLeft.x"
+                :y="shape.topLeft.y"
+                :width="shape.size.width"
+                :height="shape.size.height"
+                :fill="shape.fill ?? 'none'"
+                :stroke="shape.stroke ?? '#000'"
+            ></rect>
         </g>
     </svg>
 </template>

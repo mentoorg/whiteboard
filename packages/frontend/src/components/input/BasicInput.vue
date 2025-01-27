@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { addShapeRel, type Vector, type WhiteboardData } from '../../data'
+import { addShapeRel, createRectFromPoints, type Vector, type WhiteboardData } from '../../data'
 import { createEmitter, type Emitter, type Events } from '../../utils/emitter'
 import BrushEditor from './BrushEditor.vue'
 import { log } from '../../store/debug'
@@ -23,7 +23,7 @@ const createToolHandle = (setup: (handle: ToolHandle) => void): ToolHandle => {
     return handle
 }
 
-const TOOL_NAMES = [ 'move', 'line', 'clear', 'color' ] as const
+const TOOL_NAMES = [ 'select', 'move', 'line', 'rect', 'clear', 'color' ] as const
 type ToolName = typeof TOOL_NAMES[number]
 
 interface Tool {
@@ -35,6 +35,14 @@ interface Tool {
 const showColorPicker = ref(false)
 
 const TOOLS: Record<ToolName, Tool> = reactive({
+    select: {
+        type: 'mode',
+        handle: createToolHandle(handle => {
+            handle.on('start', () => {
+                emit('setCursor', 'default')
+            })
+        })
+    },
     move: {
         type: 'mode',
         handle: createToolHandle(handle => {
@@ -136,6 +144,81 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                 })
                 state.value.disposePreview = () => {
                     disposePreviewLine()
+                    disposePreviewCircle()
+                }
+            })
+        })
+    },
+    rect: {
+        type: 'mode',
+        handle: createToolHandle(handle => {
+            type RectToolState =
+                | { state: 'wait-for-start' }
+                | {
+                    state: 'wait-for-end'
+                    start: Vector
+                    end: Vector
+                    disposeStartPoint: () => void
+                    disposePreview?: () => void
+                }
+            const state = ref<RectToolState>({ state: 'wait-for-start' })
+
+            const start = () => {
+                emit('setCursor', 'crosshair')
+                state.value = { state: 'wait-for-start' }
+            }
+            const end = () => {
+                if (state.value.state === 'wait-for-end') {
+                    state.value.disposeStartPoint()
+                    state.value.disposePreview?.()
+                }
+            }
+
+            handle.on('start', start)
+            handle.on('end', end)
+            handle.on('mousedown', pos => {
+                if (state.value.state === 'wait-for-start') {
+                    const disposeStartPoint = addShapeRel(props.data, {
+                        type: 'circle',
+                        center: pos,
+                        radius: 3,
+                    })
+                    state.value = {
+                        state: 'wait-for-end',
+                        start: pos,
+                        end: pos,
+                        disposeStartPoint
+                    }
+                }
+            })
+            handle.on('mouseup', () => {
+                if (state.value.state === 'wait-for-end') {
+                    state.value.disposeStartPoint()
+                    addShapeRel(props.data, {
+                        ...createRectFromPoints(state.value.start, state.value.end),
+                        stroke: brush.strokeColor,
+                        fill: brush.fillColor,
+                    })
+                    end()
+                    start()
+                }
+            })
+            handle.on('mousemove', pos => {
+                if (state.value.state !== 'wait-for-end') return
+                state.value.end = pos
+                state.value.disposePreview?.()
+                const disposePreviewRect = addShapeRel(props.data, {
+                    ...createRectFromPoints(state.value.start, pos),
+                    stroke: brush.strokeColor,
+                    fill: brush.fillColor,
+                })
+                const disposePreviewCircle = addShapeRel(props.data, {
+                    type: 'circle',
+                    center: pos,
+                    radius: 3,
+                })
+                state.value.disposePreview = () => {
+                    disposePreviewRect()
                     disposePreviewCircle()
                 }
             })

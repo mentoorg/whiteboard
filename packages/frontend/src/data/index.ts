@@ -46,6 +46,10 @@ export const moveShape = <S extends PreShape>(shape: S, delta: Vector): S => {
             start: vectorAdd(shape.start, delta),
             end: vectorAdd(shape.end, delta),
         }
+        case 'rect': return {
+            ...shape,
+            topLeft: vectorAdd(shape.topLeft, delta),
+        }
         case 'circle': return {
             ...shape,
             center: vectorAdd(shape.center, delta),
@@ -55,6 +59,7 @@ export const moveShape = <S extends PreShape>(shape: S, delta: Vector): S => {
 
 export type PreShape =
     | LineShape
+    | RectShape
     | CircleShape
 
 export type Shape = PreShape & {
@@ -75,14 +80,39 @@ export interface LineShape extends Strokable {
     end: Vector
 }
 
+export interface RectShape extends Strokable, Fillable {
+    type: 'rect'
+    topLeft: Vector
+    size: Size
+}
+
+export const createRectFromPoints = (start: Vector, end: Vector): RectShape => {
+    return {
+        type: 'rect',
+        topLeft: {
+            x: Math.min(start.x, end.x),
+            y: Math.min(start.y, end.y),
+        },
+        size: {
+            width: Math.abs(start.x - end.x),
+            height: Math.abs(start.y - end.y),
+        }
+    }
+}
+
 export interface CircleShape extends Strokable, Fillable {
     type: 'circle'
     radius: number
     center: Vector
 }
 
-export type WhiteboardData = {
+export interface WhiteboardAction {
+    // TODO
+}
+
+export interface WhiteboardData {
     size: Size
     viewBox: ViewBox
     shapes: Shape[]
+    history: WhiteboardAction[]
 }
