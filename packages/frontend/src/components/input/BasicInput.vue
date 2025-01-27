@@ -186,8 +186,6 @@ const wrapMouseListener = (
     listener: (pos: Vector, ev: MouseEvent | TouchEvent) => void
 ) => (ev: MouseEvent | TouchEvent) => {
     log(`Event: ${event}`)
-    ev.preventDefault()
-
     const rect = props.outputEl?.getBoundingClientRect()
     if (! rect) return
 
@@ -201,15 +199,18 @@ const wrapMouseListener = (
 }
 
 const internalEvents = [ 'touchstart', 'mousedown' ] satisfies Array<keyof WindowEventMap>
-internalEvents.forEach(event => useEventListener(() => props.outputEl, event, wrapMouseListener(event, pos => {
+internalEvents.forEach(event => useEventListener(() => props.outputEl, event, wrapMouseListener(event, (pos, ev) => {
     if (event === 'touchstart') event = 'mousedown'
+    ev.preventDefault()
     activeTool.value?.handle.emit(event, pos)
 })))
 
 const externalEvents = [ 'touchmove', 'touchend', 'touchcancel', 'mousemove', 'mouseup' ] satisfies Array<keyof WindowEventMap>
-externalEvents.forEach(event => useEventListener(document, event, wrapMouseListener(event, pos => {
+externalEvents.forEach(event => useEventListener(document, event, wrapMouseListener(event, (pos, ev) => {
     if (event === 'touchend' || event === 'touchcancel') event = 'mouseup'
     else if (event === 'touchmove') event = 'mousemove'
+
+    if (event === 'mousemove') ev.preventDefault()
     activeTool.value?.handle.emit(event, pos)
 })))
 
@@ -245,7 +246,7 @@ selectTool(TOOLS.line)
                 <button
                     class="tool-button"
                     :class="{ active: tool.active }"
-                    @click.stop="selectTool(tool)"
+                    @click.capture.stop="selectTool(tool)"
                 >
                     {{ toolName }}
                 </button>
