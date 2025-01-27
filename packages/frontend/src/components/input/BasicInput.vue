@@ -4,6 +4,7 @@ import { useEventListener } from '@vueuse/core'
 import { addShapeRel, type Vector, type WhiteboardData } from '../../data'
 import { createEmitter, type Emitter, type Events } from '../../utils/emitter'
 import BrushEditor from './BrushEditor.vue'
+import { log } from '../../store/debug'
 
 type ToolHandle = Emitter<ToolEvents>
 
@@ -71,6 +72,7 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                 | {
                     state: 'wait-for-end'
                     start: Vector
+                    end: Vector
                     disposeStartPoint: () => void
                     disposePreview?: () => void
                 }
@@ -96,16 +98,21 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                         center: pos,
                         radius: 3,
                     })
-                    state.value = { state: 'wait-for-end', start: pos, disposeStartPoint }
+                    state.value = {
+                        state: 'wait-for-end',
+                        start: pos,
+                        end: pos,
+                        disposeStartPoint
+                    }
                 }
             })
-            handle.on('mouseup', pos => {
+            handle.on('mouseup', () => {
                 if (state.value.state === 'wait-for-end') {
                     state.value.disposeStartPoint()
                     addShapeRel(props.data, {
                         type: 'line',
                         start: state.value.start,
-                        end: pos,
+                        end: state.value.end,
                         stroke: brush.strokeColor,
                     })
                     end()
@@ -114,6 +121,7 @@ const TOOLS: Record<ToolName, Tool> = reactive({
             })
             handle.on('mousemove', pos => {
                 if (state.value.state !== 'wait-for-end') return
+                state.value.end = pos
                 state.value.disposePreview?.()
                 const disposePreviewLine = addShapeRel(props.data, {
                     type: 'line',
@@ -173,21 +181,37 @@ const emit = defineEmits<{
     setCursor: [ cursor: string ]
 }>()
 
-const wrapMouseListener = (listener: (pos: Vector) => void) => (ev: MouseEvent) => {
+const wrapMouseListener = (
+    event: keyof WindowEventMap,
+    listener: (pos: Vector, ev: MouseEvent | TouchEvent) => void
+) => (ev: MouseEvent | TouchEvent) => {
+    log(`Event: ${event}`)
+    ev.preventDefault()
+
     const rect = props.outputEl?.getBoundingClientRect()
     if (! rect) return
 
+    const { clientX, clientY } = ev instanceof MouseEvent ? ev : ev.touches[0] ?? {}
+
     const pos = {
-        x: ev.clientX - rect.left,
-        y: ev.clientY - rect.top,
+        x: clientX - rect.left,
+        y: clientY - rect.top,
     }
-    listener(pos)
+    listener(pos, ev)
 }
 
-const mouseEvents = [ 'mousemove', 'mousedown', 'mouseup' ] satisfies Array<keyof WindowEventMap>
-mouseEvents.forEach(event => useEventListener(window, event, wrapMouseListener(pos => (
+const internalEvents = [ 'touchstart', 'mousedown' ] satisfies Array<keyof WindowEventMap>
+internalEvents.forEach(event => useEventListener(() => props.outputEl, event, wrapMouseListener(event, pos => {
+    if (event === 'touchstart') event = 'mousedown'
     activeTool.value?.handle.emit(event, pos)
-))))
+})))
+
+const externalEvents = [ 'touchmove', 'touchend', 'touchcancel', 'mousemove', 'mouseup' ] satisfies Array<keyof WindowEventMap>
+externalEvents.forEach(event => useEventListener(document, event, wrapMouseListener(event, pos => {
+    if (event === 'touchend' || event === 'touchcancel') event = 'mouseup'
+    else if (event === 'touchmove') event = 'mousemove'
+    activeTool.value?.handle.emit(event, pos)
+})))
 
 const selectTool = (tool: Tool) => {
     if (tool.type === 'mode') {

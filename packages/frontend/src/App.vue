@@ -2,6 +2,9 @@
 import { reactive } from 'vue';
 import Whiteboard from './components/Whiteboard.vue'
 import { addShape, type WhiteboardData } from './data'
+import Debugger from './components/Debugger.vue';
+
+const isDebugging = import.meta.env.DEV
 
 const mockData: WhiteboardData = reactive({
     size: { width: 800, height: 600 },
@@ -29,7 +32,5 @@ addShape(mockData, {
         output-mode="svg"
         :data="mockData"
     />
+    <Debugger v-if="isDebugging" />
 </template>
-
-<style scoped>
-</style>
