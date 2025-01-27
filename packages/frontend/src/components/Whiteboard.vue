@@ -29,10 +29,23 @@ const setCursor = (value: string) => {
             @set-cursor="setCursor"
         />
 
-        <SvgOutput
-            v-if="outputMode === 'svg'"
-            ref="outputComp"
-            :data="data"
-        />
+        <div class="whiteboard-output">
+            <SvgOutput
+                v-if="outputMode === 'svg'"
+                ref="outputComp"
+                :data="data"
+            />
+        </div>
     </div>
 </template>
+
+<style scoped>
+.whiteboard-input {
+    margin-bottom: 1em;
+}
+
+.whiteboard-output {
+    width: fit-content;
+    border: 1px solid black;
+}
+</style>
