@@ -30,8 +30,8 @@ defineExpose({ outputEl })
 
             <circle
                 v-else-if="shape.type === 'circle'"
-                :cx="shape.x"
-                :cy="shape.y"
+                :cx="shape.center.x"
+                :cy="shape.center.y"
                 :r="shape.radius"
                 :fill="shape.fill ?? 'none'"
                 :stroke="shape.stroke ?? '#000'"

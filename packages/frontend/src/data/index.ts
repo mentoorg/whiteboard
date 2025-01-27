@@ -31,6 +31,28 @@ export const addShape = (data: WhiteboardData, shape: PreShape) => {
     }
 }
 
+export const addShapeRel = (data: WhiteboardData, shape: PreShape) => {
+    return addShape(data, moveShape(shape, data.viewBox))
+}
+
+export const vectorAdd = (a: Vector, b: Vector): Vector => {
+    return { x: a.x + b.x, y: a.y + b.y }
+}
+
+export const moveShape = <S extends PreShape>(shape: S, delta: Vector): S => {
+    switch (shape.type) {
+        case 'line': return {
+            ...shape,
+            start: vectorAdd(shape.start, delta),
+            end: vectorAdd(shape.end, delta),
+        }
+        case 'circle': return {
+            ...shape,
+            center: vectorAdd(shape.center, delta),
+        }
+    }
+}
+
 export type PreShape =
     | LineShape
     | CircleShape
@@ -53,13 +75,10 @@ export interface LineShape extends Strokable {
     end: Vector
 }
 
-export interface CircleShape extends Strokable, Fillable, Vector {
+export interface CircleShape extends Strokable, Fillable {
     type: 'circle'
     radius: number
-}
-
-export interface RectShape extends Strokable, Fillable, Vector, Size {
-    type: 'rect'
+    center: Vector
 }
 
 export type WhiteboardData = {

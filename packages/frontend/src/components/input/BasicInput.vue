@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { addShape, type Vector, type WhiteboardData } from '../../data'
+import { addShapeRel, type Vector, type WhiteboardData } from '../../data'
 import { createEmitter, type Emitter, type Events } from '../../utils/emitter'
 import BrushEditor from './BrushEditor.vue'
 
@@ -91,9 +91,9 @@ const TOOLS: Record<ToolName, Tool> = reactive({
             handle.on('end', end)
             handle.on('mousedown', pos => {
                 if (state.value.state === 'wait-for-start') {
-                    const disposeStartPoint = addShape(props.data, {
+                    const disposeStartPoint = addShapeRel(props.data, {
                         type: 'circle',
-                        ...pos,
+                        center: pos,
                         radius: 3,
                     })
                     state.value = { state: 'wait-for-end', start: pos, disposeStartPoint }
@@ -102,7 +102,7 @@ const TOOLS: Record<ToolName, Tool> = reactive({
             handle.on('mouseup', pos => {
                 if (state.value.state === 'wait-for-end') {
                     state.value.disposeStartPoint()
-                    addShape(props.data, {
+                    addShapeRel(props.data, {
                         type: 'line',
                         start: state.value.start,
                         end: pos,
@@ -115,15 +115,15 @@ const TOOLS: Record<ToolName, Tool> = reactive({
             handle.on('mousemove', pos => {
                 if (state.value.state !== 'wait-for-end') return
                 state.value.disposePreview?.()
-                const disposePreviewLine = addShape(props.data, {
+                const disposePreviewLine = addShapeRel(props.data, {
                     type: 'line',
                     start: state.value.start,
                     end: pos,
                     stroke: brush.strokeColor,
                 })
-                const disposePreviewCircle = addShape(props.data, {
+                const disposePreviewCircle = addShapeRel(props.data, {
                     type: 'circle',
-                    ...pos,
+                    center: pos,
                     radius: 3,
                 })
                 state.value.disposePreview = () => {
