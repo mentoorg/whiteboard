@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { addShapeRel, createRectFromPoints, type Vector, type WhiteboardData } from '../../data'
+import { addShapeRel, addShapeWithAction, createRectFromPoints, redoAction, undoAction, type Vector, type WhiteboardData } from '../../data'
 import { createEmitter, type Emitter, type Events } from '../../utils/emitter'
 import BrushEditor from './BrushEditor.vue'
 import { log } from '../../store/debug'
@@ -23,13 +23,14 @@ const createToolHandle = (setup: (handle: ToolHandle) => void): ToolHandle => {
     return handle
 }
 
-const TOOL_NAMES = [ 'select', 'move', 'line', 'rect', 'clear', 'color' ] as const
+const TOOL_NAMES = [ 'select', 'move', 'line', 'rect', 'clear', 'color', 'undo', 'redo' ] as const
 type ToolName = typeof TOOL_NAMES[number]
 
 interface Tool {
     type: 'mode' | 'action' | 'switch'
     handle: ToolHandle
     active?: boolean
+    disabled?: boolean
 }
 
 const showColorPicker = ref(false)
@@ -81,8 +82,8 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                     state: 'wait-for-end'
                     start: Vector
                     end: Vector
-                    disposeStartPoint: () => void
-                    disposePreview?: () => void
+                    removeStartPoint: () => void
+                    removePreview?: () => void
                 }
             const state = ref<LineToolState>({ state: 'wait-for-start' })
 
@@ -92,8 +93,8 @@ const TOOLS: Record<ToolName, Tool> = reactive({
             }
             const end = () => {
                 if (state.value.state === 'wait-for-end') {
-                    state.value.disposeStartPoint()
-                    state.value.disposePreview?.()
+                    state.value.removeStartPoint()
+                    state.value.removePreview?.()
                 }
             }
 
@@ -101,7 +102,7 @@ const TOOLS: Record<ToolName, Tool> = reactive({
             handle.on('end', end)
             handle.on('mousedown', pos => {
                 if (state.value.state === 'wait-for-start') {
-                    const disposeStartPoint = addShapeRel(props.data, {
+                    const { removeShape: removeStartPoint } = addShapeRel(props.data, {
                         type: 'circle',
                         center: pos,
                         radius: 3,
@@ -110,14 +111,14 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                         state: 'wait-for-end',
                         start: pos,
                         end: pos,
-                        disposeStartPoint
+                        removeStartPoint
                     }
                 }
             })
             handle.on('mouseup', () => {
                 if (state.value.state === 'wait-for-end') {
-                    state.value.disposeStartPoint()
-                    addShapeRel(props.data, {
+                    state.value.removeStartPoint()
+                    addShapeWithAction(props.data, {
                         type: 'line',
                         start: state.value.start,
                         end: state.value.end,
@@ -130,21 +131,21 @@ const TOOLS: Record<ToolName, Tool> = reactive({
             handle.on('mousemove', pos => {
                 if (state.value.state !== 'wait-for-end') return
                 state.value.end = pos
-                state.value.disposePreview?.()
-                const disposePreviewLine = addShapeRel(props.data, {
+                state.value.removePreview?.()
+                const { removeShape: removePreviewLine } = addShapeRel(props.data, {
                     type: 'line',
                     start: state.value.start,
                     end: pos,
                     stroke: brush.strokeColor,
                 })
-                const disposePreviewCircle = addShapeRel(props.data, {
+                const { removeShape: removePreviewCircle } = addShapeRel(props.data, {
                     type: 'circle',
                     center: pos,
                     radius: 3,
                 })
-                state.value.disposePreview = () => {
-                    disposePreviewLine()
-                    disposePreviewCircle()
+                state.value.removePreview = () => {
+                    removePreviewLine()
+                    removePreviewCircle()
                 }
             })
         })
@@ -158,8 +159,8 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                     state: 'wait-for-end'
                     start: Vector
                     end: Vector
-                    disposeStartPoint: () => void
-                    disposePreview?: () => void
+                    removeStartPoint: () => void
+                    removePreview?: () => void
                 }
             const state = ref<RectToolState>({ state: 'wait-for-start' })
 
@@ -169,8 +170,8 @@ const TOOLS: Record<ToolName, Tool> = reactive({
             }
             const end = () => {
                 if (state.value.state === 'wait-for-end') {
-                    state.value.disposeStartPoint()
-                    state.value.disposePreview?.()
+                    state.value.removeStartPoint()
+                    state.value.removePreview?.()
                 }
             }
 
@@ -178,7 +179,7 @@ const TOOLS: Record<ToolName, Tool> = reactive({
             handle.on('end', end)
             handle.on('mousedown', pos => {
                 if (state.value.state === 'wait-for-start') {
-                    const disposeStartPoint = addShapeRel(props.data, {
+                    const { removeShape: removeStartPoint } = addShapeRel(props.data, {
                         type: 'circle',
                         center: pos,
                         radius: 3,
@@ -187,14 +188,14 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                         state: 'wait-for-end',
                         start: pos,
                         end: pos,
-                        disposeStartPoint
+                        removeStartPoint
                     }
                 }
             })
             handle.on('mouseup', () => {
                 if (state.value.state === 'wait-for-end') {
-                    state.value.disposeStartPoint()
-                    addShapeRel(props.data, {
+                    state.value.removeStartPoint()
+                    addShapeWithAction(props.data, {
                         ...createRectFromPoints(state.value.start, state.value.end),
                         stroke: brush.strokeColor,
                         fill: brush.fillColor,
@@ -206,20 +207,20 @@ const TOOLS: Record<ToolName, Tool> = reactive({
             handle.on('mousemove', pos => {
                 if (state.value.state !== 'wait-for-end') return
                 state.value.end = pos
-                state.value.disposePreview?.()
-                const disposePreviewRect = addShapeRel(props.data, {
+                state.value.removePreview?.()
+                const { removeShape: removePreviewRect } = addShapeRel(props.data, {
                     ...createRectFromPoints(state.value.start, pos),
                     stroke: brush.strokeColor,
                     fill: brush.fillColor,
                 })
-                const disposePreviewCircle = addShapeRel(props.data, {
+                const { removeShape: removePreviewCircle } = addShapeRel(props.data, {
                     type: 'circle',
                     center: pos,
                     radius: 3,
                 })
-                state.value.disposePreview = () => {
-                    disposePreviewRect()
-                    disposePreviewCircle()
+                state.value.removePreview = () => {
+                    removePreviewRect()
+                    removePreviewCircle()
                 }
             })
         })
@@ -239,7 +240,21 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                 showColorPicker.value = ! showColorPicker.value
             })
         })
-    }
+    },
+    undo: {
+        type: 'action',
+        disabled: computed(() => props.data.historyIndex === 0),
+        handle: createToolHandle(handle => {
+            handle.on('start', () => undoAction(props.data))
+        })
+    },
+    redo: {
+        type: 'action',
+        disabled: computed(() => props.data.historyIndex === props.data.history.length),
+        handle: createToolHandle(handle => {
+            handle.on('start', () => redoAction(props.data))
+        })
+    },
 })
 
 const activeTool = ref<Tool | null>(null)
@@ -298,6 +313,7 @@ externalEvents.forEach(event => useEventListener(document, event, wrapMouseListe
 })))
 
 const selectTool = (tool: Tool) => {
+    if (tool.disabled) return
     if (tool.type === 'mode') {
         if (activeTool.value === tool) return
         const lastTool = activeTool.value
@@ -328,7 +344,10 @@ selectTool(TOOLS.line)
             >
                 <button
                     class="tool-button"
-                    :class="{ active: tool.active }"
+                    :class="{
+                        active: tool.active,
+                    }"
+                    :disabled="tool.disabled"
                     @click.capture.stop="selectTool(tool)"
                 >
                     {{ toolName }}
@@ -371,9 +390,14 @@ selectTool(TOOLS.line)
     cursor: pointer;
 }
 
-.tool-button:hover, .tool-button.active {
+.tool-button:not(:disabled):hover, .tool-button.active {
     background-color: #000;
     color: #fff;
+}
+
+.tool-button:disabled {
+    cursor: not-allowed;
+    background-color: #ccc;
 }
 
 .popup {

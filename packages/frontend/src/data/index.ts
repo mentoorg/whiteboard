@@ -23,16 +23,24 @@ export const createIdGenerator = () => {
 }
 export const genShapeId = createIdGenerator()
 
-export const addShape = (data: WhiteboardData, shape: PreShape) => {
+export const addShape = (data: WhiteboardData, preShape: PreShape) => {
     const id = genShapeId()
-    data.shapes.push({ ...shape, id })
-    return () => {
-        remove(data.shapes, it => it.id === id)
+    const shape = { ...preShape, id }
+    data.shapes.push(shape)
+    return {
+        shape,
+        removeShape: () => remove(data.shapes, it => it.id === id)
     }
 }
 
-export const addShapeRel = (data: WhiteboardData, shape: PreShape) => {
-    return addShape(data, moveShape(shape, data.viewBox))
+export const addShapeRel = (data: WhiteboardData, preShape: PreShape) => {
+    return addShape(data, moveShape(preShape, data.viewBox))
+}
+
+export const addShapeWithAction = (data: WhiteboardData, preShape: PreShape) => {
+    const shapeHandle = addShapeRel(data, preShape)
+    pushAction(data, { type: 'add_shape', shape: shapeHandle.shape })
+    return shapeHandle
 }
 
 export const vectorAdd = (a: Vector, b: Vector): Vector => {
@@ -106,13 +114,48 @@ export interface CircleShape extends Strokable, Fillable {
     center: Vector
 }
 
-export interface WhiteboardAction {
-    // TODO
+export type Action =
+    | AddShapeAction
+
+export interface AddShapeAction {
+    type: 'add_shape'
+    shape: Shape
 }
 
 export interface WhiteboardData {
     size: Size
     viewBox: ViewBox
     shapes: Shape[]
-    history: WhiteboardAction[]
+    history: Action[]
+    historyIndex: number
+}
+
+export const pushAction = (data: WhiteboardData, action: Action) => {
+    data.history.splice(data.historyIndex)
+    data.history.push(action)
+    data.historyIndex ++
+}
+
+export const undoAction = (data: WhiteboardData) => {
+    if (! data.historyIndex) return
+
+    const action = data.history[-- data.historyIndex]
+
+    switch (action.type) {
+        case 'add_shape':
+            remove(data.shapes, it => it.id === action.shape.id)
+            break
+    }
+}
+
+export const redoAction = (data: WhiteboardData) => {
+    if (data.historyIndex === data.history.length) return
+
+    const action = data.history[data.historyIndex ++]
+
+    switch (action.type) {
+        case 'add_shape':
+            data.shapes.push(action.shape)
+            break
+    }
 }

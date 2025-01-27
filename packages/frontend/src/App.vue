@@ -11,6 +11,7 @@ const data: WhiteboardData = reactive({
     viewBox: { x: 0, y: 0, width: 600, height: 600 },
     shapes: [],
     history: [],
+    historyIndex: 0,
 })
 </script>
 
