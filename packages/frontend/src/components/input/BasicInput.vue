@@ -5,16 +5,17 @@ import { addShapeRel, addShapeWithAction, createRectFromPoints, redoAction, undo
 import { createEmitter, type Emitter, type Events } from '../../utils/emitter'
 import BrushEditor from './BrushEditor.vue'
 import { log } from '../../store/debug'
+import type { RemoveIndex } from '../../utils'
 
 type ToolHandle = Emitter<ToolEvents>
 
 interface ToolEvents extends Events {
     start: []
     end: []
-    click: [ pos: Vector ]
-    mousemove: [ pos: Vector ]
-    mousedown: [ pos: Vector ]
-    mouseup: [ pos: Vector ]
+    gesturemove: [ pos: Vector ]
+    gesturestart: [ pos: Vector ]
+    gestureend: [ pos: Vector ]
+    zoom: [ dir: 1 | -1, pos: Vector ]
 }
 
 const createToolHandle = (setup: (handle: ToolHandle) => void): ToolHandle => {
@@ -56,19 +57,20 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                 emit('setCursor', 'all-scroll')
             })
 
-            handle.on('mousedown', pos => {
-                if (state.value.state === 'wait-for-start') {
-                    state.value = { state: 'wait-for-end', start: pos }
-                }
+            handle.on('gesturestart', pos => {
+                if (state.value.state !== 'wait-for-start') return
+                emit('setTempCursor', 'all-scroll')
+                state.value = { state: 'wait-for-end', start: pos }
             })
-            handle.on('mousemove', pos => {
+            handle.on('gesturemove', pos => {
                 if (state.value.state !== 'wait-for-end') return
                 const oldPos = state.value.start
                 state.value.start = pos
-                props.data.viewBox.x -= pos.x - oldPos.x
-                props.data.viewBox.y -= pos.y - oldPos.y
+                props.data.viewport.x -= pos.x - oldPos.x
+                props.data.viewport.y -= pos.y - oldPos.y
             })
-            handle.on('mouseup', () => {
+            handle.on('gestureend', () => {
+                emit('setTempCursor', null)
                 state.value = { state: 'wait-for-start' }
             })
         })
@@ -100,7 +102,7 @@ const TOOLS: Record<ToolName, Tool> = reactive({
 
             handle.on('start', start)
             handle.on('end', end)
-            handle.on('mousedown', pos => {
+            handle.on('gesturestart', pos => {
                 if (state.value.state === 'wait-for-start') {
                     const { removeShape: removeStartPoint } = addShapeRel(props.data, {
                         type: 'circle',
@@ -115,20 +117,7 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                     }
                 }
             })
-            handle.on('mouseup', () => {
-                if (state.value.state === 'wait-for-end') {
-                    state.value.removeStartPoint()
-                    addShapeWithAction(props.data, {
-                        type: 'line',
-                        start: state.value.start,
-                        end: state.value.end,
-                        stroke: brush.strokeColor,
-                    })
-                    end()
-                    start()
-                }
-            })
-            handle.on('mousemove', pos => {
+            handle.on('gesturemove', pos => {
                 if (state.value.state !== 'wait-for-end') return
                 state.value.end = pos
                 state.value.removePreview?.()
@@ -146,6 +135,19 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                 state.value.removePreview = () => {
                     removePreviewLine()
                     removePreviewCircle()
+                }
+            })
+            handle.on('gestureend', () => {
+                if (state.value.state === 'wait-for-end') {
+                    state.value.removeStartPoint()
+                    addShapeWithAction(props.data, {
+                        type: 'line',
+                        start: state.value.start,
+                        end: state.value.end,
+                        stroke: brush.strokeColor,
+                    })
+                    end()
+                    start()
                 }
             })
         })
@@ -177,34 +179,22 @@ const TOOLS: Record<ToolName, Tool> = reactive({
 
             handle.on('start', start)
             handle.on('end', end)
-            handle.on('mousedown', pos => {
-                if (state.value.state === 'wait-for-start') {
-                    const { removeShape: removeStartPoint } = addShapeRel(props.data, {
-                        type: 'circle',
-                        center: pos,
-                        radius: 3,
-                    })
-                    state.value = {
-                        state: 'wait-for-end',
-                        start: pos,
-                        end: pos,
-                        removeStartPoint
-                    }
+            handle.on('gesturestart', pos => {
+                if (state.value.state !== 'wait-for-start') return
+
+                const { removeShape: removeStartPoint } = addShapeRel(props.data, {
+                    type: 'circle',
+                    center: pos,
+                    radius: 3,
+                })
+                state.value = {
+                    state: 'wait-for-end',
+                    start: pos,
+                    end: pos,
+                    removeStartPoint
                 }
             })
-            handle.on('mouseup', () => {
-                if (state.value.state === 'wait-for-end') {
-                    state.value.removeStartPoint()
-                    addShapeWithAction(props.data, {
-                        ...createRectFromPoints(state.value.start, state.value.end),
-                        stroke: brush.strokeColor,
-                        fill: brush.fillColor,
-                    })
-                    end()
-                    start()
-                }
-            })
-            handle.on('mousemove', pos => {
+            handle.on('gesturemove', pos => {
                 if (state.value.state !== 'wait-for-end') return
                 state.value.end = pos
                 state.value.removePreview?.()
@@ -221,6 +211,18 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                 state.value.removePreview = () => {
                     removePreviewRect()
                     removePreviewCircle()
+                }
+            })
+            handle.on('gestureend', () => {
+                if (state.value.state === 'wait-for-end') {
+                    state.value.removeStartPoint()
+                    addShapeWithAction(props.data, {
+                        ...createRectFromPoints(state.value.start, state.value.end),
+                        stroke: brush.strokeColor,
+                        fill: brush.fillColor,
+                    })
+                    end()
+                    start()
                 }
             })
         })
@@ -268,8 +270,6 @@ const brush = reactive<Brush>({
     fillColor: 'transparent'
 })
 
-Object.assign(window, { brush })
-
 const props = defineProps<{
     data: WhiteboardData
     outputEl: Element | null | undefined
@@ -277,40 +277,80 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     setCursor: [ cursor: string ]
+    setTempCursor: [ cursor: string | null ]
 }>()
 
-const wrapMouseListener = (
-    event: keyof WindowEventMap,
-    listener: (pos: Vector, ev: MouseEvent | TouchEvent) => void
-) => (ev: MouseEvent | TouchEvent) => {
-    log(`Event: ${event}`)
+const hasTouch = 'TouchEvent' in window
+const isTouchEvent = (ev: Event): ev is TouchEvent => hasTouch && ev instanceof TouchEvent
+
+const getRelPos = (ev: MouseEvent | WheelEvent | TouchEvent) => {
     const rect = props.outputEl?.getBoundingClientRect()
-    if (! rect) return
+    if (! rect) return { x: 0, y: 0 }
 
-    const { clientX, clientY } = ev instanceof MouseEvent ? ev : ev.touches[0] ?? {}
+    const { clientX, clientY } = isTouchEvent(ev) ? ev.touches[0] ?? {} : ev
 
-    const pos = {
+    return {
         x: clientX - rect.left,
         y: clientY - rect.top,
     }
-    listener(pos, ev)
 }
 
-const internalEvents = [ 'touchstart', 'mousedown' ] satisfies Array<keyof WindowEventMap>
-internalEvents.forEach(event => useEventListener(() => props.outputEl, event, wrapMouseListener(event, (pos, ev) => {
-    if (event === 'touchstart') event = 'mousedown'
+const eventTable = [
+    { from: 'mousedown', to: 'gesturestart', target: 'output', prevent: true },
+    { from: 'mousemove', to: 'gesturemove', target: 'window', prevent: true },
+    { from: 'mouseup', to: 'gestureend', target: 'window' },
+    { from: 'touchstart', to: 'gesturestart', target: 'output', prevent: true },
+    { from: 'touchmove', to: 'gesturemove', target: 'window', prevent: true },
+    { from: 'touchend', to: 'gestureend', target: 'window' },
+    { from: 'touchcancel', to: 'gestureend', target: 'window' },
+] satisfies {
+    from: keyof WindowEventMap
+    to: keyof RemoveIndex<ToolEvents>
+    target: 'output' | 'window'
+    prevent?: boolean
+}[]
+
+let lastButtons = 0
+eventTable.forEach(({ from, to, target, prevent }) => useEventListener(
+    target === 'output' ? () => props.outputEl : window,
+    from,
+    (ev: MouseEvent | TouchEvent) => {
+        log(from + ('buttons' in ev ? ` b=${ev.buttons}` : ''))
+        if (prevent) ev.preventDefault()
+        const pos = getRelPos(ev)
+        let tool: Tool | null = null
+        if (isTouchEvent(ev)) tool = activeTool.value
+        else {
+            let buttons = from === 'mouseup' ? lastButtons : (lastButtons = ev.buttons)
+            if (buttons === 4) tool = TOOLS.move
+            else if (buttons === 1) tool = activeTool.value
+        }
+        tool?.handle.emit(to, pos)
+    })
+)
+
+const zoomHandle = createToolHandle(handle => {
+    handle.on('zoom', (dir, pos) => {
+        log(`zoom ${dir}`)
+        const { scale: s0, x, y } = props.data.viewport
+        const ds = dir * .1
+        const s = (s0 * 10 + ds * 10) / 10
+        if (s < 0.1 || s > 4.0) return
+        const { x: xc, y: yc } = pos
+        const dinvs = 1 / s - 1 / s0
+        props.data.viewport = {
+            scale: s,
+            x: x - xc * dinvs,
+            y: y - yc * dinvs,
+        }
+    })
+})
+
+useEventListener(() => props.outputEl, 'wheel', (ev: WheelEvent) => {
     ev.preventDefault()
-    activeTool.value?.handle.emit(event, pos)
-})))
-
-const externalEvents = [ 'touchmove', 'touchend', 'touchcancel', 'mousemove', 'mouseup' ] satisfies Array<keyof WindowEventMap>
-externalEvents.forEach(event => useEventListener(document, event, wrapMouseListener(event, (pos, ev) => {
-    if (event === 'touchend' || event === 'touchcancel') event = 'mouseup'
-    else if (event === 'touchmove') event = 'mousemove'
-
-    if (event === 'mousemove') ev.preventDefault()
-    activeTool.value?.handle.emit(event, pos)
-})))
+    const dir = ev.deltaY < 0 ? 1 : -1 // up: zoom in, down: zoom out
+    zoomHandle.emit('zoom', dir, getRelPos(ev))
+})
 
 const selectTool = (tool: Tool) => {
     if (tool.disabled) return

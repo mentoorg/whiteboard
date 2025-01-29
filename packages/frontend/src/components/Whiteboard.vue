@@ -13,20 +13,25 @@ const outputComp = ref<InstanceType<typeof SvgOutput> | null>(null)
 const outputEl = computed(() => outputComp.value?.outputEl)
 
 const cursor = ref('auto')
+const tempCursor = ref<string | null>(null)
 const setCursor = (value: string) => {
     cursor.value = value
+}
+const setTempCursor = (value: string | null) => {
+    tempCursor.value = value
 }
 </script>
 
 <template>
     <div
         class="whiteboard"
-        :style="{ cursor }"
+        :style="{ cursor: tempCursor ?? cursor }"
     >
         <BasicInput
             :data="data"
             :output-el="outputEl"
             @set-cursor="setCursor"
+            @set-temp-cursor="setTempCursor"
         />
 
         <div class="whiteboard-output">

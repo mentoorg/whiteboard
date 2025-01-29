@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { viewBoxToString, type WhiteboardData } from '../../data'
+import { getViewBox, type WhiteboardData } from '../../data'
 
 defineProps<{
     data: WhiteboardData
@@ -16,7 +16,7 @@ defineExpose({ outputEl })
         xmlns="http://www.w3.org/2000/svg"
         :width="data.size.width"
         :height="data.size.height"
-        :viewBox="viewBoxToString(data.viewBox)"
+        :viewBox="getViewBox(data)"
     >
         <g v-for="shape in data.shapes">
             <line

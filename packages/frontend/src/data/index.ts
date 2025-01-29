@@ -7,15 +7,19 @@ export interface Vector {
     y: number
 }
 
+export type Transform = (a: Vector) => Vector
+
 export interface Size {
     width: number
     height: number
 }
 
-export interface ViewBox extends Vector, Size {}
+export interface Viewport extends Vector {
+    scale: number
+}
 
-export const viewBoxToString = ({ x, y, width, height }: ViewBox) =>
-    `${x} ${y} ${width} ${height}`
+export const getViewBox = ({ size: { width, height }, viewport: { x, y, scale } }: WhiteboardData) =>
+    `${x} ${y} ${width / scale} ${height / scale}`
 
 export const createIdGenerator = () => {
     let id = 0
@@ -33,9 +37,11 @@ export const addShape = (data: WhiteboardData, preShape: PreShape) => {
     }
 }
 
-export const addShapeRel = (data: WhiteboardData, preShape: PreShape) => {
-    return addShape(data, moveShape(preShape, data.viewBox))
-}
+export const addShapeRel = (data: WhiteboardData, preShape: PreShape) => (
+    addShape(data, transformShape(preShape, a =>
+        vectorAdd(vectorMul(a, 1 / data.viewport.scale), data.viewport)
+    ))
+)
 
 export const addShapeWithAction = (data: WhiteboardData, preShape: PreShape) => {
     const shapeHandle = addShapeRel(data, preShape)
@@ -43,24 +49,30 @@ export const addShapeWithAction = (data: WhiteboardData, preShape: PreShape) => 
     return shapeHandle
 }
 
-export const vectorAdd = (a: Vector, b: Vector): Vector => {
-    return { x: a.x + b.x, y: a.y + b.y }
-}
+export const vectorAdd = (a: Vector, b: Vector): Vector => ({
+    x: a.x + b.x,
+    y: a.y + b.y,
+})
 
-export const moveShape = <S extends PreShape>(shape: S, delta: Vector): S => {
+export const vectorMul = (a: Vector, k: number): Vector => ({
+    x: a.x * k,
+    y: a.y * k,
+})
+
+export const transformShape = <S extends PreShape>(shape: S, trans: Transform): S => {
     switch (shape.type) {
         case 'line': return {
             ...shape,
-            start: vectorAdd(shape.start, delta),
-            end: vectorAdd(shape.end, delta),
+            start: trans(shape.start),
+            end: trans(shape.end),
         }
         case 'rect': return {
             ...shape,
-            topLeft: vectorAdd(shape.topLeft, delta),
+            topLeft: trans(shape.topLeft),
         }
         case 'circle': return {
             ...shape,
-            center: vectorAdd(shape.center, delta),
+            center: trans(shape.center),
         }
     }
 }
@@ -122,14 +134,6 @@ export interface AddShapeAction {
     shape: Shape
 }
 
-export interface WhiteboardData {
-    size: Size
-    viewBox: ViewBox
-    shapes: Shape[]
-    history: Action[]
-    historyIndex: number
-}
-
 export const pushAction = (data: WhiteboardData, action: Action) => {
     data.history.splice(data.historyIndex)
     data.history.push(action)
@@ -158,4 +162,12 @@ export const redoAction = (data: WhiteboardData) => {
             data.shapes.push(action.shape)
             break
     }
+}
+
+export interface WhiteboardData {
+    size: Size
+    viewport: Viewport
+    shapes: Shape[]
+    history: Action[]
+    historyIndex: number
 }

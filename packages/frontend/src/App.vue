@@ -8,7 +8,7 @@ const isDebugging = import.meta.env.DEV
 
 const data: WhiteboardData = reactive({
     size: { width: 600, height: 600 },
-    viewBox: { x: 0, y: 0, width: 600, height: 600 },
+    viewport: { x: 0, y: 0, scale: 1 },
     shapes: [],
     history: [],
     historyIndex: 0,
