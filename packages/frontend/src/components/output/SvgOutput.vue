@@ -1,13 +1,25 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { getViewBox, type WhiteboardData } from '../../data'
+import { type Shape } from '../../data/graphic'
 
-defineProps<{
+const props = defineProps<{
     data: WhiteboardData
+}>()
+
+const emit = defineEmits<{
+    enterShape: [ Shape ]
+    leaveShape: [ Shape ]
 }>()
 
 const outputEl = ref<SVGElement | null>(null)
 defineExpose({ outputEl })
+
+const shapes = computed(() => props.data.shapes
+    .filter(shape => ! ('visible' in shape) || shape.visible)
+)
+
+Object.assign(window, { shapes: props.data.shapes })
 </script>
 
 <template>
@@ -18,7 +30,11 @@ defineExpose({ outputEl })
         :height="data.size.height"
         :viewBox="getViewBox(data)"
     >
-        <g v-for="shape in data.shapes">
+        <g
+            v-for="shape in shapes"
+            @mouseenter="emit('enterShape', shape)"
+            @mouseleave="emit('leaveShape', shape)"
+        >
             <line
                 v-if="shape.type === 'line'"
                 :x1="shape.start.x"

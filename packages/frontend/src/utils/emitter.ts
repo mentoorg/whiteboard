@@ -1,4 +1,4 @@
-import { eq, remove, type Disposer, type RemoveIndex } from "."
+import { eq, remove, type Disposer, type RemoveIndex } from '.'
 
 export type Events = {
     [event: string]: any[]

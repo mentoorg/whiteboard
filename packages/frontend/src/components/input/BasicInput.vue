@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { addShapeRel, addShapeWithAction, createRectFromPoints, redoAction, undoAction, type Vector, type WhiteboardData } from '../../data'
 import { createEmitter, type Emitter, type Events } from '../../utils/emitter'
 import BrushEditor from './BrushEditor.vue'
 import { log } from '../../store/debug'
-import type { RemoveIndex } from '../../utils'
+import { objectFromEntries, type RemoveIndex } from '../../utils'
+import type { WhiteboardData, GlobalEvents } from '../../data'
+import { addShapeA, removeShapesA, undoAction, redoAction } from '../../data/action'
+import { type CircleShape, type Vector, addShape, addShapeRel, intersect, rectP, removeShapes, viewportTransform } from '../../data/graphic'
+
+const props = defineProps<{
+    data: WhiteboardData
+    outputEl: Element | null | undefined
+    bus: Emitter<GlobalEvents>
+}>()
+
+// Tools
 
 type ToolHandle = Emitter<ToolEvents>
 
@@ -18,48 +28,45 @@ interface ToolEvents extends Events {
     zoom: [ dir: 1 | -1, pos: Vector ]
 }
 
+const setups: (() => void)[] = []
+
 const createToolHandle = (setup: (handle: ToolHandle) => void): ToolHandle => {
     const handle = createEmitter()
-    setup(handle)
+    setups.push(() => setup(handle))
     return handle
 }
 
-const TOOL_NAMES = [ 'select', 'move', 'line', 'rect', 'clear', 'color', 'undo', 'redo' ] as const
+const setCursor = (cursor: string | null | undefined) => props.bus.emit('set-cursor', cursor)
+const resetCursor = () => setCursor(currentMode.value?.cursor)
+
+const TOOL_NAMES = [ 'move', 'line', 'rect', 'erase', 'clear', 'color', 'undo', 'redo' ] as const
 type ToolName = typeof TOOL_NAMES[number]
 
 interface Tool {
     type: 'mode' | 'action' | 'switch'
+    cursor?: string
     handle: ToolHandle
-    active?: boolean
-    disabled?: boolean
+    isDisabled?: () => boolean
 }
 
-const showColorPicker = ref(false)
+interface ToolState {
+    active: boolean
+    disabled: boolean
+}
 
-const TOOLS: Record<ToolName, Tool> = reactive({
-    select: {
-        type: 'mode',
-        handle: createToolHandle(handle => {
-            handle.on('start', () => {
-                emit('setCursor', 'default')
-            })
-        })
-    },
+const TOOLS: Record<ToolName, Tool> = {
     move: {
         type: 'mode',
+        cursor: 'all-scroll',
         handle: createToolHandle(handle => {
             type MoveToolState =
                 | { state: 'wait-for-start' }
                 | { state: 'wait-for-end', start: Vector }
             const state = ref<MoveToolState>({ state: 'wait-for-start' })
 
-            handle.on('start', () => {
-                emit('setCursor', 'all-scroll')
-            })
-
             handle.on('gesturestart', pos => {
                 if (state.value.state !== 'wait-for-start') return
-                emit('setTempCursor', 'all-scroll')
+                setCursor('all-scroll')
                 state.value = { state: 'wait-for-end', start: pos }
             })
             handle.on('gesturemove', pos => {
@@ -70,13 +77,14 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                 props.data.viewport.y -= pos.y - oldPos.y
             })
             handle.on('gestureend', () => {
-                emit('setTempCursor', null)
+                resetCursor()
                 state.value = { state: 'wait-for-start' }
             })
         })
     },
     line: {
         type: 'mode',
+        cursor: 'crosshair',
         handle: createToolHandle(handle => {
             type LineToolState =
                 | { state: 'wait-for-start' }
@@ -90,7 +98,6 @@ const TOOLS: Record<ToolName, Tool> = reactive({
             const state = ref<LineToolState>({ state: 'wait-for-start' })
 
             const start = () => {
-                emit('setCursor', 'crosshair')
                 state.value = { state: 'wait-for-start' }
             }
             const end = () => {
@@ -108,6 +115,7 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                         type: 'circle',
                         center: pos,
                         radius: 3,
+                        system: true,
                     })
                     state.value = {
                         state: 'wait-for-end',
@@ -126,11 +134,13 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                     start: state.value.start,
                     end: pos,
                     stroke: brush.strokeColor,
+                    system: true,
                 })
                 const { removeShape: removePreviewCircle } = addShapeRel(props.data, {
                     type: 'circle',
                     center: pos,
                     radius: 3,
+                    system: true,
                 })
                 state.value.removePreview = () => {
                     removePreviewLine()
@@ -140,7 +150,7 @@ const TOOLS: Record<ToolName, Tool> = reactive({
             handle.on('gestureend', () => {
                 if (state.value.state === 'wait-for-end') {
                     state.value.removeStartPoint()
-                    addShapeWithAction(props.data, {
+                    addShapeA(props.data, {
                         type: 'line',
                         start: state.value.start,
                         end: state.value.end,
@@ -154,6 +164,7 @@ const TOOLS: Record<ToolName, Tool> = reactive({
     },
     rect: {
         type: 'mode',
+        cursor: 'crosshair',
         handle: createToolHandle(handle => {
             type RectToolState =
                 | { state: 'wait-for-start' }
@@ -167,7 +178,6 @@ const TOOLS: Record<ToolName, Tool> = reactive({
             const state = ref<RectToolState>({ state: 'wait-for-start' })
 
             const start = () => {
-                emit('setCursor', 'crosshair')
                 state.value = { state: 'wait-for-start' }
             }
             const end = () => {
@@ -186,6 +196,7 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                     type: 'circle',
                     center: pos,
                     radius: 3,
+                    system: true,
                 })
                 state.value = {
                     state: 'wait-for-end',
@@ -199,14 +210,16 @@ const TOOLS: Record<ToolName, Tool> = reactive({
                 state.value.end = pos
                 state.value.removePreview?.()
                 const { removeShape: removePreviewRect } = addShapeRel(props.data, {
-                    ...createRectFromPoints(state.value.start, pos),
+                    ...rectP(state.value.start, pos),
                     stroke: brush.strokeColor,
                     fill: brush.fillColor,
+                    system: true,
                 })
                 const { removeShape: removePreviewCircle } = addShapeRel(props.data, {
                     type: 'circle',
                     center: pos,
                     radius: 3,
+                    system: true,
                 })
                 state.value.removePreview = () => {
                     removePreviewRect()
@@ -216,8 +229,8 @@ const TOOLS: Record<ToolName, Tool> = reactive({
             handle.on('gestureend', () => {
                 if (state.value.state === 'wait-for-end') {
                     state.value.removeStartPoint()
-                    addShapeWithAction(props.data, {
-                        ...createRectFromPoints(state.value.start, state.value.end),
+                    addShapeA(props.data, {
+                        ...rectP(state.value.start, state.value.end),
                         stroke: brush.strokeColor,
                         fill: brush.fillColor,
                     })
@@ -227,11 +240,38 @@ const TOOLS: Record<ToolName, Tool> = reactive({
             })
         })
     },
+    erase: {
+        type: 'mode',
+        cursor: 'crosshair',
+        handle: createToolHandle(handle => {
+            let state: 'idle' | 'work' = 'idle'
+
+            const eraser: CircleShape = reactive({
+                type: 'circle',
+                center: computed(() => viewportTransform(props.data)(mouse.value)),
+                radius: 10,
+                visible: computed(() => toolsState.erase.active),
+                system: true,
+            })
+            addShape(props.data, eraser)
+
+            handle.on('gesturestart', () => {
+                state = 'work'
+            })
+            handle.on('gesturemove', () => {
+                if (state !== 'work') return
+                removeShapesA(props.data, it => it !== eraser && intersect(eraser, it))
+            })
+            handle.on('gestureend', () => {
+                state = 'idle'
+            })
+        })
+    },
     clear: {
         type: 'action',
         handle: createToolHandle(handle => {
             handle.on('start', () => {
-                props.data.shapes = []
+                removeShapesA(props.data, it => ! it.system)
             })
         })
     },
@@ -245,89 +285,47 @@ const TOOLS: Record<ToolName, Tool> = reactive({
     },
     undo: {
         type: 'action',
-        disabled: computed(() => props.data.historyIndex === 0),
+        isDisabled: () => props.data.historyIndex === 0,
         handle: createToolHandle(handle => {
             handle.on('start', () => undoAction(props.data))
         })
     },
     redo: {
         type: 'action',
-        disabled: computed(() => props.data.historyIndex === props.data.history.length),
+        isDisabled: () => props.data.historyIndex === props.data.history.length,
         handle: createToolHandle(handle => {
             handle.on('start', () => redoAction(props.data))
         })
     },
-})
-
-const activeTool = ref<Tool | null>(null)
-
-interface Brush {
-    strokeColor: string
-    fillColor: string
 }
-const brush = reactive<Brush>({
-    strokeColor: 'black',
-    fillColor: 'transparent'
-})
 
-const props = defineProps<{
-    data: WhiteboardData
-    outputEl: Element | null | undefined
-}>()
+const toolsState: Record<ToolName, ToolState> = reactive(
+    objectFromEntries(TOOL_NAMES.map(name => [ name, {
+        active: false,
+        disabled: TOOLS[name].isDisabled ? computed(TOOLS[name].isDisabled) : false,
+    } ]))
+)
 
-const emit = defineEmits<{
-    setCursor: [ cursor: string ]
-    setTempCursor: [ cursor: string | null ]
-}>()
-
-const hasTouch = 'TouchEvent' in window
-const isTouchEvent = (ev: Event): ev is TouchEvent => hasTouch && ev instanceof TouchEvent
-
-const getRelPos = (ev: MouseEvent | WheelEvent | TouchEvent) => {
-    const rect = props.outputEl?.getBoundingClientRect()
-    if (! rect) return { x: 0, y: 0 }
-
-    const { clientX, clientY } = isTouchEvent(ev) ? ev.touches[0] ?? {} : ev
-
-    return {
-        x: clientX - rect.left,
-        y: clientY - rect.top,
+const activateTool = (toolName: ToolName) => {
+    const toolState = toolsState[toolName]
+    const tool = TOOLS[toolName]
+    if (toolState.disabled) return
+    if (tool.type === 'mode') {
+        if (currentMode.value === tool) return
+        const lastModeName = currentModeName.value
+        if (lastModeName) {
+            toolsState[lastModeName].active = false
+            TOOLS[lastModeName].handle.emit('end')
+        }
+        currentModeName.value = toolName
+        resetCursor()
+        toolState.active = true
+    }
+    tool.handle.emit('start')
+    if (tool.type === 'switch') {
+        toolState.active = ! toolState.active
     }
 }
-
-const eventTable = [
-    { from: 'mousedown', to: 'gesturestart', target: 'output', prevent: true },
-    { from: 'mousemove', to: 'gesturemove', target: 'window', prevent: true },
-    { from: 'mouseup', to: 'gestureend', target: 'window' },
-    { from: 'touchstart', to: 'gesturestart', target: 'output', prevent: true },
-    { from: 'touchmove', to: 'gesturemove', target: 'window', prevent: true },
-    { from: 'touchend', to: 'gestureend', target: 'window' },
-    { from: 'touchcancel', to: 'gestureend', target: 'window' },
-] satisfies {
-    from: keyof WindowEventMap
-    to: keyof RemoveIndex<ToolEvents>
-    target: 'output' | 'window'
-    prevent?: boolean
-}[]
-
-let lastButtons = 0
-eventTable.forEach(({ from, to, target, prevent }) => useEventListener(
-    target === 'output' ? () => props.outputEl : window,
-    from,
-    (ev: MouseEvent | TouchEvent) => {
-        log(from + ('buttons' in ev ? ` b=${ev.buttons}` : ''))
-        if (prevent) ev.preventDefault()
-        const pos = getRelPos(ev)
-        let tool: Tool | null = null
-        if (isTouchEvent(ev)) tool = activeTool.value
-        else {
-            let buttons = from === 'mouseup' ? lastButtons : (lastButtons = ev.buttons)
-            if (buttons === 4) tool = TOOLS.move
-            else if (buttons === 1) tool = activeTool.value
-        }
-        tool?.handle.emit(to, pos)
-    })
-)
 
 const zoomHandle = createToolHandle(handle => {
     handle.on('zoom', (dir, pos) => {
@@ -346,55 +344,112 @@ const zoomHandle = createToolHandle(handle => {
     })
 })
 
+// State
+
+const currentModeName = ref<ToolName | null>(null)
+const currentMode = computed(() => currentModeName.value ? TOOLS[currentModeName.value] : null)
+
+const showColorPicker = ref(false) // TODO: refactor to Tool
+
+interface Brush {
+    strokeColor: string
+    fillColor: string
+}
+const brush = reactive<Brush>({
+    strokeColor: 'black',
+    fillColor: 'transparent'
+})
+
+// Event handling
+
+const hasTouch = 'TouchEvent' in window
+const isTouchEvent = (ev: Event): ev is TouchEvent => hasTouch && ev instanceof TouchEvent
+
+const getRelPos = (ev: MouseEvent | WheelEvent | TouchEvent) => {
+    const rect = props.outputEl?.getBoundingClientRect()
+    if (! rect) return { x: 0, y: 0 }
+
+    const { clientX, clientY } = isTouchEvent(ev) ? ev.touches[0] ?? {} : ev
+
+    return {
+        x: clientX - rect.left,
+        y: clientY - rect.top,
+    }
+}
+
+const gestureEventList = [
+    { from: 'mousedown', to: 'gesturestart', target: 'output', prevent: true },
+    { from: 'mousemove', to: 'gesturemove', target: 'window', prevent: true },
+    { from: 'mouseup', to: 'gestureend', target: 'window' },
+    { from: 'touchstart', to: 'gesturestart', target: 'output', prevent: true },
+    { from: 'touchmove', to: 'gesturemove', target: 'window', prevent: true },
+    { from: 'touchend', to: 'gestureend', target: 'window' },
+    { from: 'touchcancel', to: 'gestureend', target: 'window' },
+] satisfies {
+    from: keyof WindowEventMap
+    to: keyof RemoveIndex<ToolEvents>
+    target: 'output' | 'window'
+    prevent?: boolean
+}[]
+
+const mouse = ref<Vector>({ x: 0, y: 0 })
+
+let lastButtons = 0
+gestureEventList.forEach(({ from, to, target, prevent }) => useEventListener(
+    target === 'output' ? () => props.outputEl : window,
+    from,
+    (ev: MouseEvent | TouchEvent) => {
+        log(from + ('buttons' in ev ? ` b=${ev.buttons}` : ''))
+        if (prevent) ev.preventDefault()
+        const pos = mouse.value = getRelPos(ev)
+        let tool: Tool | null = null
+        if (isTouchEvent(ev)) tool = currentMode.value
+        else {
+            let buttons = from === 'mouseup' ? lastButtons : (lastButtons = ev.buttons)
+            if (buttons === 4) tool = TOOLS.move
+            else if (buttons === 1) tool = currentMode.value
+        }
+        tool?.handle.emit(to, pos)
+    })
+)
+
 useEventListener(() => props.outputEl, 'wheel', (ev: WheelEvent) => {
     ev.preventDefault()
     const dir = ev.deltaY < 0 ? 1 : -1 // up: zoom in, down: zoom out
     zoomHandle.emit('zoom', dir, getRelPos(ev))
 })
 
-const selectTool = (tool: Tool) => {
-    if (tool.disabled) return
-    if (tool.type === 'mode') {
-        if (activeTool.value === tool) return
-        const lastTool = activeTool.value
-        if (lastTool) {
-            lastTool.active = false
-            lastTool.handle.emit('end')
-        }
-        activeTool.value = tool
-        tool.active = true
-    }
-    tool.handle.emit('start')
-    if (tool.type === 'switch') {
-        tool.active = ! tool.active
-    }
-}
+props.bus.on('enter-shape', shape => {
+    log(`entershape ${shape.type}#${shape.id}`)
+})
 
-selectTool(TOOLS.line)
+// Initialization
+
+removeShapes(props.data, it => !! it.system)
+setups.forEach(setup => setup())
+activateTool('move')
 </script>
 
 <template>
     <div class="whiteboard-input">
         <div class="toolbar">
             <div
-                v-for="tool, toolName in TOOLS"
+                v-for="state, name in toolsState"
                 class="tool"
-                :key="toolName"
-                :data-tool="toolName"
+                :key="name"
+                :data-tool="name"
             >
                 <button
                     class="tool-button"
-                    :class="{
-                        active: tool.active,
-                    }"
-                    :disabled="tool.disabled"
-                    @click.capture.stop="selectTool(tool)"
+                    :class="{ active: state.active }"
+                    :disabled="state.disabled"
+                    @click.capture.stop="activateTool(name)"
                 >
-                    {{ toolName }}
+                    {{ name }}
                 </button>
 
                 <BrushEditor
-                    v-if="toolName === 'color'"
+                    v-if="name === 'color'"
                     class="popup"
                     v-show="showColorPicker"
                     v-model:stroke="brush.strokeColor"

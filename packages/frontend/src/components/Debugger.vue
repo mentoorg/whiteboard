@@ -34,6 +34,10 @@ import { logsAggregated } from '../store/debug'
     color: #888;
 }
 
+.log.warn {
+    color: #ff0;
+}
+
 .log.error {
     color: #f00;
 }
